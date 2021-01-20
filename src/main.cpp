@@ -48,18 +48,22 @@ int main(int argc, char **argv)
 			break;
 		}
 
-		geometry_msgs::Quaternion qtemp(transformStamped.transform.rotation);
+		tf2::Quaternion q(
+			transformStamped.transform.rotation.x, 
+			transformStamped.transform.rotation.y, 
+			transformStamped.transform.rotation.z, 
+			transformStamped.transform.rotation.w
+			);
 
-		tf2::Quaternion q(qtemp.x, qtemp.y, qtemp.z, qtemp.w);
 		tf2::Vector3 v(1.0f, 0, 0);
 
 		v = quatRotate(q, v);
 
-		float angleError = atan2(v.y(), v.x());
-
+		double angleError = atan2(v.y(), v.x());
 		angleError *= 180 / M_PI;
+		
 		std_msgs::Float64 errorMsg;
-		errorMsg.data = (double)angleError;
+		errorMsg.data = angleError;
 		publisherError.publish(errorMsg);
 
 		rate.sleep();
