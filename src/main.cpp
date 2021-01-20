@@ -1,56 +1,69 @@
 #include "ros/ros.h"
 #include "geometry_msgs/Pose.h"
+#include "geometry_msgs/TransformStamped.h"
 #include "std_msgs/Float64.h"
 #include "tf2_geometry_msgs/tf2_geometry_msgs.h"
+#include <tf2_ros/transform_listener.h>
 
 #include <cmath>
 
 using namespace std;
 
-bool receivedSetPoint = false;
-
-ros::Publisher publisherError;
-
-tf2::Quaternion setpointOrientation;
-
-void setpointCallback(const geometry_msgs::Pose::ConstPtr &setpoint)
-{
-    receivedSetPoint = true;
-    fromMsg(setpoint->orientation, setpointOrientation);
-}
-
-void measurementCallback(const geometry_msgs::Pose::ConstPtr &measurement)
-{
-    if (receivedSetPoint == false)
-        return;
-
-    tf2::Quaternion measurementOrientation;
-    fromMsg(measurement->orientation, measurementOrientation);
-
-    tf2::Quaternion error = setpointOrientation * measurementOrientation.inverse();
-    tf2::Vector3 v(1.0f, 0, 0);
-
-    v = quatRotate(error, v);
-
-    float angleError = atan2(v.z(), v.x());
-
-    angleError *= 180 / M_PI;
-    std_msgs::Float64 errorMsg;
-    errorMsg.data = (double)angleError;
-    publisherError.publish(errorMsg);
-}
-
 int main(int argc, char **argv)
 {
-    ros::init(argc, argv, "error");
-    ros::NodeHandle nodeHandle;
+	ros::init(argc, argv, "error");
+	ros::NodeHandle nodeHandle;
 
-    ros::Subscriber subscriberSetPoint = nodeHandle.subscribe("setpoint", 1000, setpointCallback);
-    ros::Subscriber subscriberMeasurement = nodeHandle.subscribe("measurement", 1000, measurementCallback);
+	ros::Publisher publisherError = nodeHandle.advertise<std_msgs::Float64>("error", 1000);
 
-    publisherError = nodeHandle.advertise<std_msgs::Float64>("error", 1000);
+	tf2_ros::Buffer tfBuffer;
+	tf2_ros::TransformListener tfListener(tfBuffer);
 
-    ros::spin();
+	std::string target;
+	if (!ros::param::get("~target_frame", target)) {
+		ROS_ERROR("target_frame param not set");
+		return 0;
+	}
 
-    return 0;
+	std::string source;
+	if (!ros::param::get("~source_frame", source)) {
+		ROS_ERROR("source_frame param not set");
+		return 0;
+	}
+	
+	ros::Rate rate(60.0);
+	while (nodeHandle.ok())
+	{
+		if (!tfBuffer.canTransform(target, source, ros::Time(0), ros::Duration(1.0))) {
+			ros::Duration(1.0).sleep();
+			continue;
+		}
+
+		geometry_msgs::TransformStamped transformStamped;
+
+		try {
+			transformStamped = tfBuffer.lookupTransform(target, source, ros::Time(0));
+		} catch (tf2::TransformException &ex) {
+			ROS_ERROR("%s",ex.what());
+			break;
+		}
+
+		geometry_msgs::Quaternion qtemp(transformStamped.transform.rotation);
+
+		tf2::Quaternion q(qtemp.x, qtemp.y, qtemp.z, qtemp.w);
+		tf2::Vector3 v(1.0f, 0, 0);
+
+		v = quatRotate(q, v);
+
+		float angleError = atan2(v.y(), v.x());
+
+		angleError *= 180 / M_PI;
+		std_msgs::Float64 errorMsg;
+		errorMsg.data = (double)angleError;
+		publisherError.publish(errorMsg);
+
+		rate.sleep();
+	}
+
+	return 0;
 }
